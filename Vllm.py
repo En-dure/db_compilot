@@ -45,6 +45,42 @@ class Vllm(Base):
         response_dict = response.json()
         return response_dict['choices'][0]['message']['content']
 
+    def submit_semantic_prompt(self, prompt, **kwargs) -> str:
+        url = f"{self.host}/v1/chat/completions"
+        data = {
+            "model": self.model,
+            "stream": False,
+            "messages": prompt,
+        }
+        if self.auth_key is not None:
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {self.auth_key}'
+            }
+            response = requests.post(url, headers=headers, json=data)
+        else:
+            response = requests.post(url, json=data)
+        response_dict = response.json()
+        return response_dict['choices'][0]['message']['content']
+
+
+    def submit_thinking_prompt(self, prompt, **kwargs) -> str:
+        url = f"{self.host}/v1/chat/completions"
+        data = {
+            "model": self.model,
+            "stream": False,
+            "messages": prompt,
+        }
+        if self.auth_key is not None:
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {self.auth_key}'
+            }
+            response = requests.post(url, headers=headers, json=data)
+        else:
+            response = requests.post(url, json=data)
+        response_dict = response.json()
+        return response_dict['choices'][0]['message']['content']
 
 
 

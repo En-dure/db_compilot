@@ -21,7 +21,7 @@ CREATE TABLE `2023`  (
   `儿科急诊人数` text CHARACTER ,
   `儿科发热人数` text CHARACTER ,
   `发热人数` text CHARACTER ,
-  `出院人数` text CHARACTER ,
+  `出院人数` text CHARACTER  '出院人次',
   `结账人数` text CHARACTER ,
   `死亡人数` text CHARACTER ,
   `重症人数` text CHARACTER ,
@@ -56,12 +56,12 @@ CREATE TABLE `2023`  (
   `转往他科` text CHARACTER ,
   `病床周转率` text CHARACTER ,
   `平均住院日` text CHARACTER ,
-  `门急诊总费用` text CHARACTER ,
+  `门急诊总费用` text CHARACTER '门急诊总收入',
   `门急诊药费` text CHARACTER ,
   `门急诊中成药费` text CHARACTER ,
   `门急诊草药费` longtext CHARACTER ,
   `门急诊中草药费` text CHARACTER ,
-  `门急诊耗材费` text CHARACTER ,
+  `门急诊耗材费` text CHARACTER '门急诊卫生材料',
   `门急诊检查费` text CHARACTER ,
   `门急诊检验费` text CHARACTER ,
   `门急诊医疗服务费` text CHARACTER ,
@@ -72,7 +72,7 @@ CREATE TABLE `2023`  (
   `住院中成药费` text CHARACTER ,
   `住院草药费` text CHARACTER ,
   `住院中草药费` text CHARACTER ,
-  `住院耗材费` text CHARACTER ,
+  `住院耗材费` text CHARACTER '住院卫生材料',
   `住院检查费` text CHARACTER ,
   `住院检验费` text CHARACTER ,
   `住院医疗服务费` text CHARACTER ,
@@ -81,4 +81,4 @@ CREATE TABLE `2023`  (
   `医保总控人次` text CHARACTER ,
   `医保总控费用` text CHARACTER ,
   `last_update` text CHARACTER 
-) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ;
