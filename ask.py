@@ -25,9 +25,8 @@ if __name__ == "__main__":
         print(thinking_result["res"])
     else:
         thinking_result = thinking_result["res"]
-
-    # prompt = vllm.get_sql_prompt(question)
-    # answer = vllm.submit_prompt(prompt)
-# print(answer)
+        print(thinking_result)
+    sql_prompt = vllm.get_sql_prompt(question, thinking_result)
+    answer = vllm.submit_prompt(sql_prompt)
 
 

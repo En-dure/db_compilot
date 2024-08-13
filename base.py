@@ -153,9 +153,10 @@ class Base(ABC):
             ## 用户问题：
                 {question}
             # 回答:
-                根据以上信息，直接生成回答question的SQL语句, 请确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。
+                根据以上信息，直接生成回答question的SQL语句, 不要有任何额外信息，请确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。
         '''
-
+        thinking_prompt = [self.system_message(sql_prompt), self.user_message(question)]
+        return  thinking_prompt
     def get_thinking_prompt(self, question, semantic:str = None):
         ddl_info = self.get_ddl_info()
         index_info = self.get_index_info()
@@ -174,8 +175,8 @@ class Base(ABC):
         # 回答指南：
             1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info中提取出最相关的信息, 并以此说明您解决此问题的思路，
                 思路应尽量简洁,如果有复杂问题，可将问题进行分解。
-               思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，计算过程，涉及的操作
-                输出格式为:{{"Done":"True", "res":""}}
+               思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，计算过程，涉及的操作, 
+                输出格式为:{{"Done":"True", "res":""}} res的内容需转化为json格式，因此不要有非法换行符等内容。
             2. 如果无法从ddl_info和index_info中提取出最相关的信息，请说明原因，
                 输出格式为:{{"Done":"False", "res":""}}
         '''
