@@ -1,8 +1,13 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Union
 import logging
+
+from sqlalchemy.dialects.mysql import pymysql
+
 from config import base_config
-import  os
+import os
+
+
 class Base(ABC):
     def __init__(self, config=None):
         self.config = base_config
@@ -13,6 +18,7 @@ class Base(ABC):
         self.index_file = self.config.get("index_file", "")
         self.document_file = self.config.get("document_file", "")
         self.SQL_DDL_file = self.config.get("SQL_DDL_file", "")
+
     def setup_logger(self, log_file: str, name: str = __name__, level: str = "INFO"):
         logger = logging.getLogger(name)
         if not logger.hasHandlers():
@@ -24,7 +30,8 @@ class Base(ABC):
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
         return logger
-    def log(self, logger, message:str, title: str = "Info"):
+
+    def log(self, logger, message: str, title: str = "Info"):
         log_method = getattr(logger, title.lower(), logger.info)
         log_method(message)
 
@@ -48,36 +55,38 @@ class Base(ABC):
 
         return initial_prompt
 
-    def get_examples(self ):
+    def get_examples(self):
         pass
+
     def get_document(self):
         pass
+
     def get_index(self):
         pass
 
     def get_rag_sql_prompt(
             self,
             question: str,
-            initial_prompt:str = None,
-            response_guidelines:str = None,
-            question_sql_list:list = None,
-            ddl_list:list= None,
-            doc_list:list= None,
+            initial_prompt: str = None,
+            response_guidelines: str = None,
+            question_sql_list: list = None,
+            ddl_list: list = None,
+            doc_list: list = None,
             **kwargs
     ):
         if initial_prompt is None:
             initial_prompt = f'''
-                你是一个{self.dialect}专家. 请帮忙生成一个 SQL 查询来回答这个问题。您的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
+                你是一个{self.dialect}专家. 你需要生成一个 SQL 查询来回答这个问题。您的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
             '''
         if response_guidelines is None:
             response_guidelines = (
-            "===回答指南\n"
-            "1. 如果提供的上下文足够，请生成一个有效的 SQL 查询，不需要对问题进行任何解释。\n"
-            "2. 如果提供的上下文几乎足够，但需要知道特定列中特定字符串的知识，请生成一个中间 SQL 查询以找到该列中不同的字符串。在查询前加上注释说 intermediate_sql \n"
-            "3. 如果提供的上下文不充分，请解释为什么不能生成。\n"
-            "4. 请使用最相关的表。\n"
-            "5. 如果问题之前已经被问过并回答过，请完全按照之前给出的答案重复回答。\n"
-            f"6. 确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。\n"
+                "===回答指南\n"
+                "1. 如果提供的上下文足够，生成一个有效的 SQL 查询，不需要对问题进行任何解释。\n"
+                "2. 如果提供的上下文几乎足够，但需要知道特定列中特定字符串的知识，生成一个中间 SQL 查询以找到该列中不同的字符串。在查询前加上注释说 intermediate_sql \n"
+                "3. 如果提供的上下文不充分，解释为什么不能生成。\n"
+                "4. 使用最相关的表。\n"
+                "5. 如果问题之前已经被问过并回答过，完全按照之前给出的答案重复回答。\n"
+                f"6. 确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。\n"
             )
         prompt = [self.system_message(initial_prompt + response_guidelines)]
         self.log(self.logger, f"Initial prompt: {prompt}")
@@ -114,11 +123,12 @@ class Base(ABC):
 
     def get_example_info(self):
         return None
+
     def get_semantic_prompt(self, question, initial_semantic_prompt: str = None):
         if initial_semantic_prompt is None:
             initial_semantic_prompt = '''
             # 角色:语义分析专家
-                您的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
+                你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
             # 工作内容：
                 1. 根据用户的问题question，进行语义分析，从question中提取出时间，科室，指标三个元素，其中任意一项均不能为空，科室可以为全部科室，所有科室
             ## 说明
@@ -133,15 +143,39 @@ class Base(ABC):
             semantic_prompt = [self.system_message(initial_semantic_prompt), self.user_message(question)]
             return semantic_prompt
 
+    def get_thinking_prompt(self, question, semantic: str = None):
+        ddl_info = self.get_ddl_info()
+        index_info = self.get_index_info()
+        example_info = self.get_example_info()
+        thinking_initial_prompt = f'''
+        # 角色:思考专家    
+            1. 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
+            2. 你的回答将提供思路，以指导最终的SQL语句生成
+        # 信息说明: 
+            ## 1. ddl_info: 该部分包含数据库的表结构信息
+                {ddl_info}
+            ## 2. index_info: 该部分包含指标名称和指标的计算公式或过程
+                {index_info}
+            ## 3. example_info:该部分为示例信息，用于帮助用户理解问题
+                {example_info}
+        # 回答指南：
+            1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info中提取出最相关的信息, 并以此说明你解决此问题的思路，
+                思路应尽量简洁,如果有复杂问题，可将问题进行分解。
+               思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，计算过程，涉及的操作, 
+                输出格式为:{{"Done":"True", "res":""}} res的内容需转化为json格式，因此不要有非法换行符等内容。
+            2. 如果无法从ddl_info和index_info中提取出最相关的信息，说明原因，
+                输出格式为:{{"Done":"False", "res":""}}
+        '''
+        thinking_prompt = [self.system_message(thinking_initial_prompt), self.user_message(question + semantic)]
+        return thinking_prompt
 
-
-    def get_sql_prompt(self,question,thingking):
+    def get_sql_prompt(self, question, thingking):
         ddl_info = self.get_ddl_info()
         index_info = self.get_index_info()
         example_info = self.get_example_info()
         sql_prompt = f'''
             # 角色: {self.dialect}专家
-            请结合解决问题专家的建议，帮忙生成一个SQL查询来回答用户的question。您的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
+            结合解决问题专家的建议，帮忙生成一个SQL查询来回答用户的question。你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
             ## 数据库的结构：
                 {ddl_info}
             ## 指标计算公式：
@@ -153,48 +187,50 @@ class Base(ABC):
             ## 用户问题：
                 {question}
             # 回答:
-                根据以上信息，直接生成回答question的SQL语句, 不要有任何额外信息，请确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。
+                根据以上信息，直接生成回答question的SQL语句, 不要有任何额外信息，必须确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。
         '''
         thinking_prompt = [self.system_message(sql_prompt), self.user_message(question)]
-        return  thinking_prompt
-    def get_thinking_prompt(self, question, semantic:str = None):
+        return thinking_prompt
+
+    def get_reflection_prompt(self, question: str, thinking: str, SQL: str):
         ddl_info = self.get_ddl_info()
         index_info = self.get_index_info()
         example_info = self.get_example_info()
-        thinking_initial_prompt = f'''
-        # 角色:思考专家    
-            1. 您的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
-            2. 您的回答将提供思路，以指导最终的SQL语句生成
-        # 信息说明: 
-            ## 1. ddl_info: 该部分包含数据库的表结构信息
+        reflection_prompt = f'''
+            # 角色: {self.dialect}专家
+            1. 结合解决问题专家的建议和 {self.dialect}专家的回答和用户的question, 检查{self.dialect}专家的SQL回答是否能够解决用户的问题
+            
+            2. 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
+            ## 数据库的结构：
                 {ddl_info}
-            ## 2. index_info: 该部分包含指标名称和指标的计算公式或过程
+            ## 指标计算公式：
                 {index_info}
-            ## 3. example_info:该部分为示例信息，用于帮助用户理解问题
+            ## 参考示例：
                 {example_info}
-        # 回答指南：
-            1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info中提取出最相关的信息, 并以此说明您解决此问题的思路，
-                思路应尽量简洁,如果有复杂问题，可将问题进行分解。
-               思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，计算过程，涉及的操作, 
-                输出格式为:{{"Done":"True", "res":""}} res的内容需转化为json格式，因此不要有非法换行符等内容。
-            2. 如果无法从ddl_info和index_info中提取出最相关的信息，请说明原因，
-                输出格式为:{{"Done":"False", "res":""}}
+            ## 解决问题专家的建议
+                {thinking}
+            ## 用户问题：
+                {question}
+            ## {self.dialect}专家的回答
+                {SQL}
+            # 回答
+                根据以上信息:
+                1. 如果SQL语句没有错误或要修改的内容, 直接返回SQL语句, 不要有任何额外信息
+                2. 如果SQL语句有错误或要修改的内容, 直接返回修改后的SQL语句, 不要有任何额外信息
+                3. 必须确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。
         '''
-        thinking_prompt = [self.system_message(thinking_initial_prompt), self.user_message(question+semantic)]
+        thinking_prompt = [self.system_message(reflection_prompt), self.user_message(question)]
         return thinking_prompt
 
+    def connect_to_mysql(self, SQL):
+        pass
 
-
-        
-        
-        
-        
-        
-        
     def add_ddl_to_prompt(self, ddl: str, prompt: str):
         pass
+
     def add_index_to_prompt(self, index: str, prompt: str):
         pass
+
     @abstractmethod
     def system_message(self, message: str) -> any:
         pass

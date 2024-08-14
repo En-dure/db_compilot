@@ -1,6 +1,6 @@
 DROP TABLE IF EXISTS `2023`;
 CREATE TABLE `2023`  (
-  `年月` text CHARACTER '格式为202301,表示2023年1月，依次类推，例如202302代表2023年2月',
+  `年月` text CHARACTER '格式为202301,表示2023年1月，共包含2023年的12个月,依次类推，例如202302代表2023年2月',
   `科室名称` text CHARACTER ,
   `科室名称01` text CHARACTER ,
   `病区代码` text CHARACTER ,
@@ -82,3 +82,5 @@ CREATE TABLE `2023`  (
   `医保总控费用` text CHARACTER ,
   `last_update` text CHARACTER 
 ) ;
+DROP TABLE IF EXISTS `2024`;
+CREATE TABLE `2024` LIKE `2023`;
