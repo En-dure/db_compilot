@@ -20,4 +20,5 @@ base_config = {
     "index_file": "index.txt",
     "document_file": "document.txt",
     "SQL_DDL_file": "create_tables.sql",
+    "example_file": "example.txt"
 }

@@ -1,0 +1,6 @@
+# 2024年上半年骨科门急诊收入同比增幅
+SELECT
+    (SUM(T2024.门急诊总费用) - SUM(T2023.门急诊总费用)) / SUM(T2023.门急诊总费用) AS 门急诊收入同比增幅
+FROM
+    (SELECT sum(门急诊总费用) as 门急诊总费用 FROM `2024` WHERE `年月` BETWEEN '202401' AND '202406' AND 科室名称 = '骨科') T2024,
+    (SELECT sum(门急诊总费用) as 门急诊总费用 FROM `2023` WHERE `年月` BETWEEN '202301' AND '202306' AND 科室名称 = '骨科') T2023;
