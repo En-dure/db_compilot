@@ -8,6 +8,7 @@ import os
 import pandas as pd
 from decimal import Decimal
 
+
 class Base(ABC):
     def __init__(self, config=None):
         self.config = base_config
@@ -21,6 +22,14 @@ class Base(ABC):
         self.SQL_DDL_file = self.config.get("SQL_DDL_file", "")
         self.run_sql_is_set = False
         self.relation_file = self.config.get("relation_file", "")
+        self.get_extra_info()
+
+    def get_extra_info(self):
+        self.ddl_info = self.get_ddl_info()
+        self.index_info = self.get_index_info()
+        self.example_info = self.get_example_info()
+        self.document_info = self.get_document_info()
+        self.relation_info = self.get_relation_info()
 
     def setup_logger(self, log_file: str, name: str = __name__, level: str = "INFO"):
         logger = logging.getLogger(name)
@@ -157,11 +166,16 @@ class Base(ABC):
 
     def get_semantic_prompt(self, question, initial_semantic_prompt: str = None):
         if initial_semantic_prompt is None:
-            initial_semantic_prompt = '''
+            initial_semantic_prompt = f'''
             # 角色:语义分析专家
                 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
             # 工作内容：
-                1. 根据用户的问题question，进行语义分析，从question中提取出时间，科室，指标三个元素，其中任意一项均不能为空，科室可以为全部科室，所有科室
+                1. 根据用户的问题question，进行语义分析，从question中提取出时间，科室，指标三个元素，其中任意一项均不能为空。
+                科室必须是relation_info中的科室，科室可以为全部科室，所有科室，如果问全院，则为全部科室。
+            ##  document_info:该部分为补充信息，必须重点关注
+                {self.document_info}
+            ##  relation_info: 该部分为科室的关系树，用户帮助你梳理科室之间的关系
+                {self.relation_info}
             ## 说明
                 1. 如果时间为**年，则您必须主动将其转换为**年1月1日至12月31日, 
                 2. 如果时间为**上半年, 则您必须主动将其转换为**年1月1日至6月30日,
@@ -175,23 +189,23 @@ class Base(ABC):
             return semantic_prompt
 
     def get_thinking_prompt(self, question, semantic: str = None):
-        ddl_info = self.get_ddl_info()
-        index_info = self.get_index_info()
-        example_info = self.get_example_info()
-        document_info = self.get_document_info()
+
         thinking_initial_prompt = f'''
         # 角色:思考专家    
             1. 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
             2. 你的回答将提供思路，以指导最终的SQL语句生成
         # 信息说明: 
             ## 1. ddl_info: 该部分包含数据库的表结构信息
-                {ddl_info}
+                {self.ddl_info}
             ## 2. index_info: 该部分包含指标名称和指标的计算公式或过程
-                {index_info}
+                {self.index_info}
             ## 3. example_info:该部分为示例信息，用于帮助用户理解问题
-                {example_info}
+                {self.example_info}
             ## 4. document_info:该部分为补充信息，必须重点关注
-                {document_info}
+                {self.document_info}
+            ## 5. relation_info: 该部分为科室的关系树，用户帮助你梳理科室之间的关系
+                {self.relation_info}
+           
         # 回答指南：
             1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info,document_info中提取出最相关的信息, 并以此说明你解决此问题的思路，
                 思路应尽量简洁,如果有复杂问题，可将问题进行分解。
@@ -206,21 +220,20 @@ class Base(ABC):
         return thinking_prompt
 
     def get_sql_prompt(self, question, thingking):
-        ddl_info = self.get_ddl_info()
-        index_info = self.get_index_info()
-        example_info = self.get_example_info()
-        document_info = self.get_document_info()
+
         sql_prompt = f'''
             # 角色: {self.dialect}专家
             结合解决问题专家的建议，帮忙生成一个SQL查询来回答用户的question。你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
             ## 数据库的结构：
-                {ddl_info}
+                {self.ddl_info}
             ## 指标计算公式：
-                {index_info}
+                {self.index_info}
             ## 参考示例：
-                {example_info}
+                {self.example_info}
             ## 补充信息:
-                {document_info}
+                {self.document_info}
+            ## 关系树:
+                {self.relation_info}
             ## 解决问题专家的建议
                 {thingking}
             ## 用户问题：
@@ -231,30 +244,27 @@ class Base(ABC):
                 不要有任何非法符号。
                 3. 尽量使用简单的SQL语句，需要考虑是否正确使用SUM函数
                 4. 如果参考示例中有相同的问题，直接返回SQL语句
-                5. 重点检查SQL语句中
         '''
         thinking_prompt = [self.system_message(sql_prompt), self.user_message(question)]
         return thinking_prompt
 
     def get_reflection_prompt(self, question: str, thinking: str, SQL: str):
-        ddl_info = self.get_ddl_info()
-        index_info = self.get_index_info()
-        example_info = self.get_example_info()
-        document_info = self.get_document_info()
+
         reflection_prompt = f'''
             # 角色: {self.dialect}专家
             1. 结合解决问题专家的建议和 {self.dialect}专家的回答和用户的question, 检查{self.dialect}专家的SQL回答是否能够解决用户的问题
-            
             2. 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
             ## 数据库的结构：
-                {ddl_info}
+                {self.ddl_info}
             ## 指标计算公式：
-                {index_info}
+                {self.index_info}
             ## 参考示例：
-                {example_info}
+                {self.example_info}
             ## 补充信息:
-                {document_info}
-            ## 解决问题专家的建议
+                {self.document_info}
+            ## 关系树:
+                {self.relation_info}
+            ## 解决问题专家的建议:
                 {thinking}
             ## 用户问题：
                 {question}
@@ -269,7 +279,6 @@ class Base(ABC):
         '''
         thinking_prompt = [self.system_message(reflection_prompt), self.user_message(question)]
         return thinking_prompt
-
 
     def get_final_prompt(self, question, result):
         final_prompt = f'''
@@ -433,14 +442,22 @@ class Base(ABC):
             self.times = 1
             break
 
+
+
+
+
+
+
     def add_ddl_to_prompt(self, ddl: str, prompt: str):
         pass
 
     def add_index_to_prompt(self, index: str, prompt: str):
         pass
+
     @abstractmethod
     def submit_final_prompt(self, final_prompt: List):
         pass
+
     @abstractmethod
     def submit_semantic_prompt(self, semantic_prompt: List):
         pass
@@ -454,7 +471,7 @@ class Base(ABC):
         pass
 
     @abstractmethod
-    def submit_reflection_prompt(self, question:List,):
+    def submit_reflection_prompt(self, question: List, ):
         pass
 
     @abstractmethod

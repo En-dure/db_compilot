@@ -14,11 +14,11 @@ def ask_question_list():
 
 
 if __name__ == "__main__":
-    # question = "2024年1-6月骨科住院收入较2023年同期增幅多少？"
-    #
-    # vllm = Vllm(vllm_config)
-    # vllm.connect_to_mysql(**mysql_config)
-    # if not question:
-    #     question = input("请输入你的问题: ")
-    # vllm.ask(question)
-    ask_question_list()
+    question = "2024年1-6月骨科公共平台住院收入？"
+
+    vllm = Vllm(vllm_config)
+    vllm.connect_to_mysql(**mysql_config)
+    if not question:
+        question = input("请输入你的问题: ")
+    vllm.ask(question)
+    # ask_question_list()
