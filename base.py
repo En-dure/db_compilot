@@ -20,13 +20,14 @@ class Base(ABC):
         self.example_file = self.config.get("example_file", "")
         self.SQL_DDL_file = self.config.get("SQL_DDL_file", "")
         self.run_sql_is_set = False
+        self.relation_file = self.config.get("relation_file", "")
 
     def setup_logger(self, log_file: str, name: str = __name__, level: str = "INFO"):
         logger = logging.getLogger(name)
         if not logger.hasHandlers():
             logger.setLevel(level)
             file_handler = logging.FileHandler(log_file)
-            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s ----- %(message)s')
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
         return logger
@@ -140,6 +141,20 @@ class Base(ABC):
             print(f"文件 {ddl_file_path} 不存在。")
         return ddl_info
 
+    def get_relation_info(self):
+        relation_file_path = os.path.join(self.prefix_dir, self.relation_file)
+        if os.path.isfile(relation_file_path):
+            try:
+                with open(relation_file_path, "r", encoding="utf-8") as f:
+                    relation_info = f.read()
+            except UnicodeDecodeError as e:
+                print(f"解码错误: {e}")
+            except Exception as e:
+                print(f"读取文件时发生错误: {e}")
+        else:
+            print(f"文件 {relation_file_path} 不存在。")
+        return relation_info
+
     def get_semantic_prompt(self, question, initial_semantic_prompt: str = None):
         if initial_semantic_prompt is None:
             initial_semantic_prompt = '''
@@ -180,7 +195,7 @@ class Base(ABC):
         # 回答指南：
             1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info,document_info中提取出最相关的信息, 并以此说明你解决此问题的思路，
                 思路应尽量简洁,如果有复杂问题，可将问题进行分解。
-            2.  指标的计算必须严格按照index_info里面的计算公式计算，否则，将对你进行惩罚。
+            2.  指标的计算必须严格按照index_info里面的计算公式计算，如果指标涉及到多重计算，必须说明。否则，将对你进行惩罚。
             3. 思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，从index_info中找到的计算公式，以及基于这些信息，用到的函数，你的思路。
                 其中列名必须为数据表的包含的字段，着重考虑是否需要使用聚合函数，已经SUM等函数。
                 输出格式为:{{"Done":"True", "res":""}} res的内容需转化为json格式，因此不要有非法换行符等内容。
@@ -263,7 +278,7 @@ class Base(ABC):
             ## 主要工作:
             1. 根据用户的question和最终查询结果，给用户一个简短的回答。
             ## 回答:
-            1. 选择合适的数量单位回答,超过十万，用万为单位回答。
+            1. 选择合适的数量单位回答,超过十万，用万为单位回答。超过亿，用亿为单位回答。
             2. 涉及到比例的，转换为百分比回答，保留两位小数
             ## 用户问题:
                 {question}
@@ -358,7 +373,8 @@ class Base(ABC):
         self.run_sql = run_sql_mysql
 
     def ask(self, question):
-        while True:
+        self.times = 1
+        while self.times <= 5:
             self.log(self.logger, "question:" + question)
             semantic_prompt = self.get_semantic_prompt(question)
             semantic = self.submit_semantic_prompt(semantic_prompt)
@@ -367,6 +383,7 @@ class Base(ABC):
             print("semantic", semantic_result)
             if semantic_result["Done"] == "False":
                 question = input("请重新输入你的问题: ")
+                self.times += 1
                 continue
             else:
                 semantic_result = str(semantic_result["result"])
@@ -375,9 +392,14 @@ class Base(ABC):
             thinking = self.get_thinking_prompt(question, semantic_result)
             thinking_result = self.submit_thinking_prompt(thinking)
             self.log(self.logger, "thinking:" + thinking_result)
-            thinking_result = json.loads(thinking_result)
+            try:
+                thinking_result = json.loads(thinking_result)
+            except:
+                self.times += 1
+                continue
             if thinking_result["Done"] == "False":
                 print("thinking_result:", thinking_result["res"])
+                self.times += 1
                 continue
             else:
                 thinking_result = thinking_result["res"]
@@ -396,6 +418,7 @@ class Base(ABC):
             run_sql_result = self.run_sql(reflection)
             if not isinstance(run_sql_result, pd.DataFrame):
                 if not run_sql_result:
+                    self.times += 1
                     continue
             print("result:", run_sql_result)
             sql_result = run_sql_result.to_dict()
@@ -407,11 +430,8 @@ class Base(ABC):
             result = self.submit_final_prompt(final_prompt)
             self.log(self.logger, "result:" + result)
             print("result:", result)
+            self.times = 1
             break
-
-
-
-
 
     def add_ddl_to_prompt(self, ddl: str, prompt: str):
         pass
