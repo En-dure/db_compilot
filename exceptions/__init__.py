@@ -15,12 +15,10 @@ class ConnectionError(Exception):
 
     pass
 
-
 class OTPCodeError(Exception):
     """Raise for invalid otp or not able to send it"""
 
     pass
-
 
 class SQLRemoveError(Exception):
     """Raise when not able to remove SQL"""

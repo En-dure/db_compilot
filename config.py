@@ -14,12 +14,25 @@ mysql_config = {
 
 base_config = {
     "log_dir": "log.log",
-    "dialect": "SQL",
+    "dialect": "MYSQL",
     "semantic_dir": "semantic.txt",
     "prefix_dir": "addition/",
     "index_file": "index.txt",
     "document_file": "document.txt",
     "SQL_DDL_file": "create_tables.sql",
     "example_file": "example.txt",
-    "relation_file": "relation.txt"
+    "relation_file": "relation.txt",
+    "MAX_TIMES" : 10
+}
+chromadb_config = {
+    "prefix_dir": "addition/",
+    "index_file": "index.txt",
+    "document_file": "document.txt",
+    "SQL_DDL_file": "create_tables.sql",
+    "example_file": "example.json",
+    "relation_file": "relation.txt",
+    "document_result" : 5,
+    "index_result": 10,
+    "example_result": 2,
+    "ddl_result": 5,
 }

@@ -12,10 +12,8 @@ def ask_question_list():
         vllm.ask(q)
 
 
-
 if __name__ == "__main__":
-    question = "2024年1-6月骨科公共平台住院收入？"
-
+    question = "2024年1-6月疼痛科住院医疗服务收入占比和2023年变动多大？"
     vllm = Vllm(vllm_config)
     vllm.connect_to_mysql(**mysql_config)
     if not question:

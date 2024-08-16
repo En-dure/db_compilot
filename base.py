@@ -23,6 +23,9 @@ class Base(ABC):
         self.run_sql_is_set = False
         self.relation_file = self.config.get("relation_file", "")
         self.get_extra_info()
+        self.times = 1
+        self.semantic_flag = 1
+        self.MAX_TIMES = self.config.get("MAX_TIMES", 10)
 
     def get_extra_info(self):
         self.ddl_info = self.get_ddl_info()
@@ -164,14 +167,13 @@ class Base(ABC):
             print(f"文件 {relation_file_path} 不存在。")
         return relation_info
 
-    def get_semantic_prompt(self, question, initial_semantic_prompt: str = None):
+    def get_semantic_prompt(self, question, initial_semantic_prompt: str = None, reget_info:str = ''):
         if initial_semantic_prompt is None:
             initial_semantic_prompt = f'''
             # 角色:语义分析专家
                 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
             # 工作内容：
-                1. 根据用户的问题question，进行语义分析，从question中提取出时间，科室，指标三个元素，其中任意一项均不能为空。
-                科室必须是relation_info中的科室，科室可以为全部科室，所有科室，如果问全院，则为全部科室。
+                1. 根据用户的完整问题，进行语义分析，从中提取出时间，科室，指标三个元素，其中任意一项均不能为空。
             ##  document_info:该部分为补充信息，必须重点关注
                 {self.document_info}
             ##  relation_info: 该部分为科室的关系树，用户帮助你梳理科室之间的关系
@@ -180,12 +182,16 @@ class Base(ABC):
                 1. 如果时间为**年，则您必须主动将其转换为**年1月1日至12月31日, 
                 2. 如果时间为**上半年, 则您必须主动将其转换为**年1月1日至6月30日,
                 3. 以此类推，如果包含季度等潜在时间信息，也需要您主动将其转换为具体时间段
-            ## 规则
-                如果能够成功分解，则返回格式为{"Done": "True", "question":question ,"result": {"时间": "", "科室": "", "指标": ""}}
-                如果不能够成功分解，则提示用户如下信息 text"已经提取出的信息为：**，但您的问题中缺少**信息，请补充完整"，并将其存入result中，让用户输入，
-                返回格式为{"Done": "True", "question":question ,"result": "text"}
+                4. 如果用户问全院，则为全部科室。
+            ## 回答指南和格式说明
+                1. 你必须将用户原始question和reget_info重新梳理组合作为最终的question。reget_info会包含用户的补充信息，或特殊要求。
+                2. 如果能够成功分解，则返回格式为{{"Done": "True", "question":question ,"result": {{"时间": "", "科室": "", "指标": ""}}}}
+                3. 如果不能够成功分解，则提示用户补充相关信息，将你的提示存入result中，等待用户输入,
+                返回格式为{{"Done": "True", "question":question ,"result": ""}}
+                4. 不能成功分解后，用户会补充信息reget_info, 将此信息与原始question结合作为完整用户提问，重新分解，循环此过程，直到你有足够多的信息，可以进行语义分析。
             '''
-            semantic_prompt = [self.system_message(initial_semantic_prompt), self.user_message(question)]
+
+            semantic_prompt = [self.system_message(initial_semantic_prompt), self.user_message(question + reget_info)]
             return semantic_prompt
 
     def get_thinking_prompt(self, question, semantic: str = None):
@@ -210,10 +216,11 @@ class Base(ABC):
             1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info,document_info中提取出最相关的信息, 并以此说明你解决此问题的思路，
                 思路应尽量简洁,如果有复杂问题，可将问题进行分解。
             2.  指标的计算必须严格按照index_info里面的计算公式计算，如果指标涉及到多重计算，必须说明。否则，将对你进行惩罚。
-            3. 思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，从index_info中找到的计算公式，以及基于这些信息，用到的函数，你的思路。
+            3. 如果用户的问题中指明了具体科室，那你必须根据document_info中的信息，在relation_info中挑选出具体的科室
+            4. 思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，从index_info中找到的计算公式，以及基于这些信息，用到的函数，你的思路。
                 其中列名必须为数据表的包含的字段，着重考虑是否需要使用聚合函数，已经SUM等函数。
                 输出格式为:{{"Done":"True", "res":""}} res的内容需转化为json格式，因此不要有非法换行符等内容。
-            4. 如果无法从ddl_info和index_info中提取出最相关的信息，说明原因，
+            5. 如果无法从ddl_info和index_info中提取出最相关的信息，说明原因，
                 输出格式为:{{"Done":"False", "res":""}}
         '''
         thinking_prompt = [self.system_message(thinking_initial_prompt), self.user_message(question + semantic)]
@@ -377,39 +384,41 @@ class Base(ABC):
                 except Exception as e:
                     conn.rollback()
                     return False
-
         self.run_sql_is_set = True
         self.run_sql = run_sql_mysql
 
+
+
     def ask(self, question):
-        self.times = 1
-        while self.times <= 5:
-            self.log(self.logger, "question:" + question)
-            semantic_prompt = self.get_semantic_prompt(question)
+        reget_info = ''
+        while self.times <= self.MAX_TIMES:
+            semantic_prompt = self.get_semantic_prompt(question, reget_info=reget_info)
             semantic = self.submit_semantic_prompt(semantic_prompt)
             semantic_result = json.loads(semantic)
-            self.log(self.logger, "semantic:" + semantic)
-            print("semantic", semantic_result)
-            if semantic_result["Done"] == "False":
-                question = input("请重新输入你的问题: ")
+            if semantic_result["Done"] == "True":
+                question = str(semantic_result["question"])
+                semantic_result = str(semantic_result["result"])
+
+                print("semantic_result", semantic_result)
+            else:
+                print(semantic_result["result"])
+                reget_info = input("请补充相关信息:")
                 self.times += 1
                 continue
-            else:
-                semantic_result = str(semantic_result["result"])
-                print("semantic_result", semantic_result)
-
+            self.log(self.logger, "question:" + question)
+            self.log(self.logger, "semantic:" + semantic)
             thinking = self.get_thinking_prompt(question, semantic_result)
             thinking_result = self.submit_thinking_prompt(thinking)
             self.log(self.logger, "thinking:" + thinking_result)
             try:
                 thinking_result = json.loads(thinking_result)
-            except:
+            except Exception as e:
+                print(e)
                 self.times += 1
                 continue
             if thinking_result["Done"] == "False":
                 print("thinking_result:", thinking_result["res"])
                 self.times += 1
-                continue
             else:
                 thinking_result = thinking_result["res"]
                 print("thinking_result:", thinking_result)
@@ -441,12 +450,6 @@ class Base(ABC):
             print("result:", result)
             self.times = 1
             break
-
-
-
-
-
-
 
     def add_ddl_to_prompt(self, ddl: str, prompt: str):
         pass
