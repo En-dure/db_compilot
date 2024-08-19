@@ -26,6 +26,7 @@ class Base(ABC):
         self.times = 1
         self.semantic_flag = 1
         self.MAX_TIMES = self.config.get("MAX_TIMES", 10)
+        self.MAX_SQL_ATTEMPT = self.config.get("MAX_SQL_ATTEMPT", 3)
 
     def get_extra_info(self):
         self.ddl_info = self.get_ddl_info()
@@ -181,7 +182,7 @@ class Base(ABC):
             ## 说明
                 1. 如果时间为**年，则您必须主动将其转换为**年1月1日至12月31日, 
                 2. 如果时间为**上半年, 则您必须主动将其转换为**年1月1日至6月30日,
-                3. 以此类推，如果包含季度等潜在时间信息，也需要您主动将其转换为具体时间段
+                3. 以此类推，如果包含季度等潜在时间信息，你需要主动将其转换为具体时间段
                 4. 如果用户问全院，则为全部科室。
             ## 回答指南和格式说明
                 1. 你必须将用户原始question和reget_info重新梳理组合作为最终的question。reget_info会包含用户的补充信息，或特殊要求。
@@ -226,7 +227,7 @@ class Base(ABC):
         thinking_prompt = [self.system_message(thinking_initial_prompt), self.user_message(question + semantic)]
         return thinking_prompt
 
-    def get_sql_prompt(self, question, thingking):
+    def get_sql_prompt(self, question, thingking, error: str = None):
 
         sql_prompt = f'''
             # 角色: {self.dialect}专家
@@ -245,12 +246,15 @@ class Base(ABC):
                 {thingking}
             ## 用户问题：
                 {question}
+            ##  运行SQL错误信息
+                {error}
             # 回答:
                 1.必须包含 question中的时间, 科室，指标三个元素
                 2.根据以上信息，直接生成回答question的SQL语句, 不要有任何额外信息，必须确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。
                 不要有任何非法符号。
                 3. 尽量使用简单的SQL语句，需要考虑是否正确使用SUM函数
                 4. 如果参考示例中有相同的问题，直接返回SQL语句
+                5. 如果有错误信息，根据错误信息，重新生成SQL语句
         '''
         thinking_prompt = [self.system_message(sql_prompt), self.user_message(question)]
         return thinking_prompt
@@ -258,7 +262,7 @@ class Base(ABC):
     def get_reflection_prompt(self, question: str, thinking: str, SQL: str):
 
         reflection_prompt = f'''
-            # 角色: {self.dialect}专家
+            # 角色: {self.dialect}顶级专家
             1. 结合解决问题专家的建议和 {self.dialect}专家的回答和用户的question, 检查{self.dialect}专家的SQL回答是否能够解决用户的问题
             2. 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
             ## 数据库的结构：
@@ -363,7 +367,7 @@ class Base(ABC):
         except pymysql.Error as e:
             raise ValidationError(e)
 
-        def run_sql_mysql(sql: str) -> Union[pd.DataFrame, None, bool]:
+        def run_sql_mysql(sql: str):
             if conn:
                 try:
                     conn.ping(reconnect=True)
@@ -375,15 +379,15 @@ class Base(ABC):
                     df = pd.DataFrame(
                         results, columns=[desc[0] for desc in cs.description]
                     )
-                    return df
+                    return True, df
 
                 except pymysql.Error as e:
                     conn.rollback()
                     # raise ValidationError(e)
-                    return False
+                    return False, e
                 except Exception as e:
                     conn.rollback()
-                    return False
+                    return False, e
         self.run_sql_is_set = True
         self.run_sql = run_sql_mysql
 
@@ -398,7 +402,6 @@ class Base(ABC):
             if semantic_result["Done"] == "True":
                 question = str(semantic_result["question"])
                 semantic_result = str(semantic_result["result"])
-
                 print("semantic_result", semantic_result)
             else:
                 print(semantic_result["result"])
@@ -422,22 +425,32 @@ class Base(ABC):
             else:
                 thinking_result = thinking_result["res"]
                 print("thinking_result:", thinking_result)
-            sql_prompt = self.get_sql_prompt(question, thinking_result)
-            initial_sql = self.submit_prompt(sql_prompt)
-            self.log(self.logger, "initial_sql:" + initial_sql)
+            sql_attempt = 1
+            error = ''
+            while sql_attempt <= self.MAX_SQL_ATTEMPT:
+                sql_prompt = self.get_sql_prompt(question, thinking_result, error)
+                initial_sql = self.submit_prompt(sql_prompt)
+                print("initial_sql:", initial_sql)
 
-            print("initial_sql:", initial_sql)
-            reflection_prompt = self.get_reflection_prompt(question, thinking_result, initial_sql)
-            reflection = self.submit_reflection_prompt(reflection_prompt)
+                reflection_prompt = self.get_reflection_prompt(question, thinking_result, initial_sql)
+                reflection = self.submit_reflection_prompt(reflection_prompt)
+                print("reflection:", reflection)
 
-            self.log(self.logger, "reflection:" + reflection)
-            # 添加sql的检查
-            print("reflection:", reflection)
-            run_sql_result = self.run_sql(reflection)
+                y_or_n, run_sql_result,  = self.run_sql(reflection)
+                if not y_or_n:
+                    error = run_sql_result
+                    self.log(self.logger, "SQL:" + reflection)
+                    self.log(self.logger, "SQL error:" + str(error))
+                    print(f"第{sql_attempt} 次运行SQL失败， 进行下一次尝试")
+                    sql_attempt += 1
+                    continue
+                break
             if not isinstance(run_sql_result, pd.DataFrame):
                 if not run_sql_result:
                     self.times += 1
-                    continue
+                    break
+            self.log(self.logger, "initial_sql:" + initial_sql)
+            self.log(self.logger, "reflection:" + reflection)
             print("result:", run_sql_result)
             sql_result = run_sql_result.to_dict()
             converted_dict = {key: {k: float(v) if isinstance(v, Decimal) else v for k, v in value.items()} for
@@ -450,6 +463,20 @@ class Base(ABC):
             print("result:", result)
             self.times = 1
             break
+
+    def add_example(self, question, sql):
+        new_example = {
+            "question": question,
+            "SQL": sql
+        }
+        # 读取现有的 JSON 文件
+        with open('addition/example.json', 'r', encoding='utf-8') as file:
+            data = json.load(file)
+        # 将新例子追加到 examples 数组
+        data['examples'].append(new_example)
+        # 将更新后的数据写回 JSON 文件
+        with open('addition/example.json', 'w', encoding='utf-8') as file:
+            json.dump(data, file, ensure_ascii=False, indent=4)
 
     def add_ddl_to_prompt(self, ddl: str, prompt: str):
         pass

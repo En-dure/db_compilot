@@ -1,5 +1,6 @@
 import requests
 from base import Base
+from config import base_config
 class Vllm(Base):
     def __init__(self, config=None):
         super().__init__(config)

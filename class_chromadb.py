@@ -133,7 +133,7 @@ class Chromadb():
             else:
                 result = documents[0]
             return result
-    def get_similar_question_sql(self, question: str, **kwargs) -> list:
+    def get_similar_examples(self, question: str, **kwargs) -> list:
         result = self.example_collection.query(
                 query_texts=[question],
                 n_results=self.example_result,
@@ -286,26 +286,26 @@ class Chromadb():
 
 if __name__ == '__main__':
     c = Chromadb()
-    indexs = c.get_index()
-    print(indexs)
-    for index in indexs:
-        c.add_index_data(index)
-
-    examples = c.get_examples()
-    print(examples)
-    for example in examples:
-        c.add_example_data(example)
-
-    docs = c.get_document()
-    for doc in  docs:
-        c.add_document_data(doc)
+    # indexs = c.get_index()
+    # print(indexs)
+    # for index in indexs:
+    #     c.add_index_data(index)
+    #
+    # examples = c.get_examples()
+    # print(examples)
+    # for example in examples:
+    #     c.add_example_data(example)
+    #
+    # docs = c.get_document()
+    # for doc in  docs:
+    #     c.add_document_data(doc)
     # question = "2024年上半年骨科门急诊收入同比增幅"
-    # similar_example = c.get_similar_question_sql(question)
+    # similar_example = c.get_similar_examples(question)
     # similar_index = c.get_similar_index(question)
     # similar_document = c.get_similar_document(question)
-    c.remove_collection('document')
-    c.remove_collection('example')
-    c.remove_collection('index')
+    # c.remove_collection('document')
+    # c.remove_collection('example')
+    # c.remove_collection('index')
 
     df = c.get_data()
     # print(df)

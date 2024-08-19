@@ -13,7 +13,8 @@ def ask_question_list():
 
 
 if __name__ == "__main__":
-    question = "2024年1-6月疼痛科住院医疗服务收入占比和2023年变动多大？"
+    # question = "2024年1-6月疼痛科住院医疗服务收入占比和2023年变动多大？"
+    question = "2024年1-6月肠胃外科门急诊均次费变动的影响？"
     vllm = Vllm(vllm_config)
     vllm.connect_to_mysql(**mysql_config)
     if not question:

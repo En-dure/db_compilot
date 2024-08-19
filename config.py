@@ -22,7 +22,8 @@ base_config = {
     "SQL_DDL_file": "create_tables.sql",
     "example_file": "example.txt",
     "relation_file": "relation.txt",
-    "MAX_TIMES" : 10
+    "MAX_TIMES" : 10,
+    "MAX_SQL_ATTEMPT":3
 }
 chromadb_config = {
     "prefix_dir": "addition/",
@@ -31,8 +32,8 @@ chromadb_config = {
     "SQL_DDL_file": "create_tables.sql",
     "example_file": "example.json",
     "relation_file": "relation.txt",
-    "document_result" : 5,
-    "index_result": 10,
-    "example_result": 2,
-    "ddl_result": 5,
+    "document_result" : 1,
+    "index_result": 1,
+    "example_result": 1,
+    "ddl_result": 1,
 }
