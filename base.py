@@ -1,4 +1,5 @@
 import json
+import threading
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Union
 import logging
@@ -7,8 +8,9 @@ from config import base_config
 import os
 import pandas as pd
 from decimal import Decimal
-
-
+import  time
+import sys
+import select
 class Base(ABC):
     def __init__(self, config=None):
         self.config = base_config
@@ -27,6 +29,7 @@ class Base(ABC):
         self.semantic_flag = 1
         self.MAX_TIMES = self.config.get("MAX_TIMES", 10)
         self.MAX_SQL_ATTEMPT = self.config.get("MAX_SQL_ATTEMPT", 3)
+        self.AUTO_ADD_EXAMPLES = self.config.get("AUTO_ADD_EXAMPLES", False)
 
     def get_extra_info(self):
         self.ddl_info = self.get_ddl_info()
@@ -68,35 +71,6 @@ class Base(ABC):
         initial_prompt = content
 
         return initial_prompt
-
-    def get_rag_sql_prompt(
-            self,
-            question: str,
-            initial_prompt: str = None,
-            response_guidelines: str = None,
-            question_sql_list: list = None,
-            ddl_list: list = None,
-            doc_list: list = None,
-            **kwargs
-    ):
-        if initial_prompt is None:
-            initial_prompt = f'''
-                你是一个{self.dialect}专家. 你需要生成一个 SQL 查询来回答这个问题。您的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
-            '''
-        if response_guidelines is None:
-            response_guidelines = (
-                "===回答指南\n"
-                "1. 如果提供的上下文足够，生成一个有效的 SQL 查询，不需要对问题进行任何解释。\n"
-                "2. 如果提供的上下文几乎足够，但需要知道特定列中特定字符串的知识，生成一个中间 SQL 查询以找到该列中不同的字符串。在查询前加上注释说 intermediate_sql \n"
-                "3. 如果提供的上下文不充分，解释为什么不能生成。\n"
-                "4. 使用最相关的表。\n"
-                "5. 如果问题之前已经被问过并回答过，完全按照之前给出的答案重复回答。\n"
-                f"6. 确保输出的 SQL 符合 {self.dialect} 的规范且可执行，并且没有语法错误。\n"
-            )
-        prompt = [self.system_message(initial_prompt + response_guidelines)]
-        self.log(self.logger, f"Initial prompt: {prompt}")
-        prompt.append(self.user_message(question))
-        return prompt
 
     def get_index_info(self):
         index_file_path = os.path.join(self.prefix_dir, self.index_file)
@@ -173,17 +147,16 @@ class Base(ABC):
             initial_semantic_prompt = f'''
             # 角色:语义分析专家
                 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
-            # 工作内容：
+            ## 工作内容：
                 1. 根据用户的完整问题，进行语义分析，从中提取出时间，科室，指标三个元素，其中任意一项均不能为空。
             ##  document_info:该部分为补充信息，必须重点关注
                 {self.document_info}
             ##  relation_info: 该部分为科室的关系树，用户帮助你梳理科室之间的关系
                 {self.relation_info}
-            ## 说明
+            ## 关键说明
                 1. 如果时间为**年，则您必须主动将其转换为**年1月1日至12月31日, 
-                2. 如果时间为**上半年, 则您必须主动将其转换为**年1月1日至6月30日,
-                3. 以此类推，如果包含季度等潜在时间信息，你需要主动将其转换为具体时间段
-                4. 如果用户问全院，则为全部科室。
+                2. 以此类推，如果包含季度等潜在时间信息，你需要主动将其转换为具体时间段
+                3. 如果用户问全院，则为全部科室。
             ## 回答指南和格式说明
                 1. 你必须将用户原始question和reget_info重新梳理组合作为最终的question。reget_info会包含用户的补充信息，或特殊要求。
                 2. 如果能够成功分解，则返回格式为{{"Done": "True", "question":question ,"result": {{"时间": "", "科室": "", "指标": ""}}}}
@@ -201,6 +174,7 @@ class Base(ABC):
         # 角色:思考专家    
             1. 你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明
             2. 你的回答将提供思路，以指导最终的SQL语句生成
+            3. 如果example_info中有相同的问题，你必须在思路中直接说明参考的例子
         # 信息说明: 
             ## 1. ddl_info: 该部分包含数据库的表结构信息
                 {self.ddl_info}
@@ -214,15 +188,17 @@ class Base(ABC):
                 {self.relation_info}
            
         # 回答指南：
-            1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info,document_info中提取出最相关的信息, 并以此说明你解决此问题的思路，
+            1. 根据用户的问题question和semantic，借鉴example_info， 从ddl_info,index_info,document_info，relation_info中提取出最相关的信息, 并以此说明你解决此问题的思路，
                 思路应尽量简洁,如果有复杂问题，可将问题进行分解。
             2.  指标的计算必须严格按照index_info里面的计算公式计算，如果指标涉及到多重计算，必须说明。否则，将对你进行惩罚。
-            3. 如果用户的问题中指明了具体科室，那你必须根据document_info中的信息，在relation_info中挑选出具体的科室
+            3. 如果用户的问题中指明了具体科室，那你必须根据document_info中的信息，根据确定科室流程，在relation_info中挑选出具体的科室
             4. 思路只需包含以下内容: 使用哪些表，及列[列名1，列名2,...]，从index_info中找到的计算公式，以及基于这些信息，用到的函数，你的思路。
-                其中列名必须为数据表的包含的字段，着重考虑是否需要使用聚合函数，已经SUM等函数。
+                其中列名必须为数据表的包含的字段，着重考虑是否需要使用聚合函数，SUM等函数。
+                你必须说明提取的具体是哪些科室，及其从哪个字段提取，以及提取的列名。
                 输出格式为:{{"Done":"True", "res":""}} res的内容需转化为json格式，因此不要有非法换行符等内容。
             5. 如果无法从ddl_info和index_info中提取出最相关的信息，说明原因，
                 输出格式为:{{"Done":"False", "res":""}}
+            6. 
         '''
         thinking_prompt = [self.system_message(thinking_initial_prompt), self.user_message(question + semantic)]
         return thinking_prompt
@@ -232,6 +208,8 @@ class Base(ABC):
         sql_prompt = f'''
             # 角色: {self.dialect}专家
             结合解决问题专家的建议，帮忙生成一个SQL查询来回答用户的question。你的回答应该仅基于给定的上下文，并遵循回答指南和格式说明。
+            # 特殊说明
+            如果参考示例中有相同的问题，直接返回SQL语句,不要做任何修改。
             ## 数据库的结构：
                 {self.ddl_info}
             ## 指标计算公式：
@@ -393,6 +371,7 @@ class Base(ABC):
 
 
 
+
     def ask(self, question):
         reget_info = ''
         while self.times <= self.MAX_TIMES:
@@ -448,7 +427,7 @@ class Base(ABC):
             if not isinstance(run_sql_result, pd.DataFrame):
                 if not run_sql_result:
                     self.times += 1
-                    break
+                    continue
             self.log(self.logger, "initial_sql:" + initial_sql)
             self.log(self.logger, "reflection:" + reflection)
             print("result:", run_sql_result)
@@ -459,20 +438,38 @@ class Base(ABC):
             self.log(self.logger, "sql_result:" + sql_result)
             final_prompt = self.get_final_prompt(question, sql_result)
             result = self.submit_final_prompt(final_prompt)
-            self.log(self.logger, "result:" + result)
-            print("result:", result)
+            self.log(self.logger, "查询结果:" + result)
+            print("查询结果:", result)
             self.times = 1
+            # self.auto_add_examples(question, reflection, auto=self.AUTO_ADD_EXAMPLES)
             break
+    def auto_add_examples(self, question, sql, auto = False):
+        if auto:
+            self.add_example(question, sql)
+            return "Auto Added"
 
-    def add_example(self, question, sql):
+        add_or_no = input("是否添加到样例中？, 添加请输入 y，不添加请输入 n\n请输入您的选择：")
+        print("您的选择是:", add_or_no)
+        if add_or_no == "y":
+            self.add_example(question, sql)
+        elif add_or_no == "n":
+            pass
+        else:
+            print("无效的输入，请输入 'y' 或 'n'。")
+
+    def add_example(self, question, sql, example_file = None):
+        if not example_file:
+            example_file = self.example_file
         new_example = {
             "question": question,
             "SQL": sql
         }
         # 读取现有的 JSON 文件
-        with open('addition/example.json', 'r', encoding='utf-8') as file:
+        with open(example_file, 'r', encoding='utf-8') as file:
             data = json.load(file)
         # 将新例子追加到 examples 数组
+        if 'examples' not in data:
+            data['examples'] = []
         data['examples'].append(new_example)
         # 将更新后的数据写回 JSON 文件
         with open('addition/example.json', 'w', encoding='utf-8') as file:

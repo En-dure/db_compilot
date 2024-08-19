@@ -32,8 +32,8 @@ chromadb_config = {
     "SQL_DDL_file": "create_tables.sql",
     "example_file": "example.json",
     "relation_file": "relation.txt",
-    "document_result" : 1,
-    "index_result": 1,
-    "example_result": 1,
+    "document_result" : 5,
+    "index_result": 4,
+    "example_result": 2,
     "ddl_result": 1,
 }
