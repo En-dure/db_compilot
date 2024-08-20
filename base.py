@@ -376,8 +376,12 @@ class Base(ABC):
         reget_info = ''
         while self.times <= self.MAX_TIMES:
             semantic_prompt = self.get_semantic_prompt(question, reget_info=reget_info)
-            semantic = self.submit_semantic_prompt(semantic_prompt)
-            semantic_result = json.loads(semantic)
+            try:
+                semantic = self.submit_semantic_prompt(semantic_prompt)
+                semantic_result = json.loads(semantic)
+            except Exception as e:
+                self.times += 1
+                continue
             if semantic_result["Done"] == "True":
                 question = str(semantic_result["question"])
                 semantic_result = str(semantic_result["result"])
@@ -428,6 +432,9 @@ class Base(ABC):
                 if not run_sql_result:
                     self.times += 1
                     continue
+                self.times += 1
+                continue
+
             self.log(self.logger, "initial_sql:" + initial_sql)
             self.log(self.logger, "reflection:" + reflection)
             print("result:", run_sql_result)
@@ -447,7 +454,6 @@ class Base(ABC):
         if auto:
             self.add_example(question, sql)
             return "Auto Added"
-
         add_or_no = input("是否添加到样例中？, 添加请输入 y，不添加请输入 n\n请输入您的选择：")
         print("您的选择是:", add_or_no)
         if add_or_no == "y":
